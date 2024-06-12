@@ -1,9 +1,13 @@
 #!/usr/bin/env/ python3
+# mypy: disable-error-code="attr-defined"
 
-# pip install pypiwin32
-from win32com.client import Dispatch, GetActiveObject
 import os.path
 import logging
+from typing import Optional, Callable
+
+# pip install pywin32
+import win32com.client as win32
+from pywintypes import com_error  # pylint: disable=E0611
 
 PS_MM = 4
 PS_PIXEL = 1
@@ -15,10 +19,13 @@ PS_BLEND_MODE_SCREEN = 9
 PS_BLEND_MODE_MULTIPLY = 5
 PS_PHOTOSHOP_SAVE = 1
 
-def update_all_smartlayer(psd_file, img_layers, log, background = False):
+def update_all_smartlayer(psd_file: os.DirEntry, img_layers: dict[str, os.DirEntry],
+                          log: logging.Logger,
+                          background: bool = False) -> bool:
+
     app = _prepare_photoshop(log)
     if not app:
-        return
+        return False
 
     doc = app.Open(psd_file.path)
 
@@ -34,25 +41,27 @@ def update_all_smartlayer(psd_file, img_layers, log, background = False):
         doc.Close()
         return False
 
-    else:
-        for layer in group.ArtLayers:
-            doc.ActiveLayer = layer
-            if layer.Name == 'base':
-                _replace_image_smart_layer(app, img_layers['base'].path)
-            elif layer.Name == 'glare':
-                _replace_image_smart_layer(app, img_layers['Glare'].path)
-            elif layer.Name == 'ambient':
-                _replace_image_smart_layer(app, img_layers['Ambient_Occlusion'].path)
+    for layer in group.ArtLayers:
+        doc.ActiveLayer = layer
+        if layer.Name == 'base':
+            _replace_image_smart_layer(app, img_layers['base'].path)
+        elif layer.Name == 'glare':
+            _replace_image_smart_layer(app, img_layers['Glare'].path)
+        elif layer.Name == 'ambient':
+            _replace_image_smart_layer(app, img_layers['Ambient_Occlusion'].path)
 
     doc.Save()
     doc.Close()
 
     return True
 
-def create_new_psd(img_layers, output_path, log, bg_layers = None):
+def create_new_psd(img_layers: dict[str, os.DirEntry], output_path: str,
+                   log: logging.Logger,
+                   bg_layers: Optional[dict[str, os.DirEntry]] = None) -> bool:
+
     app = _prepare_photoshop(log)
     if not app:
-        return
+        return False
 
     filename = os.path.basename(img_layers['base'])
     filename = os.path.splitext(filename)[0]
@@ -90,12 +99,12 @@ def create_new_psd(img_layers, output_path, log, bg_layers = None):
     return True
 
 
-def _prepare_photoshop(log):
+def _prepare_photoshop(log: logging.Logger) -> Optional[Callable]:
     try:
-        app = GetActiveObject("Photoshop.Application")
-    except:
+        app = win32.gencache.EnsureDispatch("Photoshop.Application")
+    except com_error:
         log.warning("Couldn't access Photoshop. Please make sure that the application is running!")
-        return False
+        return None
 
     log.debug("Successfully attached photoshop.")
 
@@ -103,58 +112,63 @@ def _prepare_photoshop(log):
 
     return app
 
-def _insert_render_stack(app, doc, layers, groupname:str, log):
+def _insert_render_stack(app: Callable,
+                         doc: Callable, img_layers: dict[str, os.DirEntry], groupname:str,
+                         log: logging.Logger) -> tuple[str, Callable, Callable, Callable, Callable]:
+
     base_group = _create_new_group(doc, groupname, log)
     base_layer = _create_new_smart_layer(app, doc, base_group, 'base', log)
-    _replace_image_smart_layer(app, layers['base'].path)
+    _replace_image_smart_layer(app, img_layers['base'].path)
 
-    if 'Ambient_Occlusion' in layers:
+    if 'Ambient_Occlusion' in img_layers:
         ambient_layer = _create_new_smart_layer(app, doc, base_group, 'ambient', log)
-        _replace_image_smart_layer(app, layers['Ambient_Occlusion'].path)
+        _replace_image_smart_layer(app, img_layers['Ambient_Occlusion'].path)
         ambient_layer.BlendMode = PS_BLEND_MODE_MULTIPLY
         ambient_layer.Opacity = 70.0
 
-    if 'Glare' in layers:
+    if 'Glare' in img_layers:
         glare_layer = _create_new_smart_layer(app, doc, base_group, 'glare', log)
-        _replace_image_smart_layer(app, layers['Glare'].path)
+        _replace_image_smart_layer(app, img_layers['Glare'].path)
         glare_layer.BlendMode = PS_BLEND_MODE_SCREEN
         glare_layer.Opacity = 40.0
 
-    return [groupname, base_group, base_layer, ambient_layer, glare_layer]
+    return (groupname, base_group, base_layer, ambient_layer, glare_layer)
 
 
-def _create_new_group(doc, name:str, log):
+def _create_new_group(doc, name:str, log: logging.Logger) -> Callable:
     group_ref = doc.LayerSets.Add()
     group_ref.Name = name
+    log.debug("Created a new group in the photoshop file with the name: %s", name)
 
     return group_ref
 
-def _create_new_smart_layer(app, doc, group, name:str, log):
+def _create_new_smart_layer(app, doc, group, name:str, log: logging.Logger) -> Callable:
     layer_ref = group.ArtLayers.Add()
     layer_ref.Kind = PS_NORMAL_LAYER
 
-    desc = Dispatch('Photoshop.ActionDescriptor')  # empty descriptor
+    desc = win32.gencache.EnsureDispatch('Photoshop.ActionDescriptor')  # empty descriptor
     app.ExecuteAction(app.StringIDToTypeID("newPlacedLayer"), desc, PS_DISPLAY_NO_DIALOGS)
 
     layer_ref = doc.ActiveLayer
-    layer_ref.name = name
+    layer_ref.Name = name
+    log.debug("Created a new smart object in the photoshop file with the name: %s", name)
 
     return layer_ref
 
-def _replace_image_smart_layer(app, new_img_path: str):
-    id_replace = app.StringIDToTypeID('placedLayerReplaceContents');
-    desc = Dispatch('Photoshop.ActionDescriptor')  # empty descriptor
+def _replace_image_smart_layer(app: Callable, new_img_path: str) -> None:
+    id_replace = app.StringIDToTypeID('placedLayerReplaceContents')
+    desc = win32.gencache.EnsureDispatch('Photoshop.ActionDescriptor')  # empty descriptor
     desc.PutPath(app.CharIDToTypeID('null'), new_img_path)
-    app.ExecuteAction(id_replace, desc, PS_DISPLAY_NO_DIALOGS);
+    app.ExecuteAction(id_replace, desc, PS_DISPLAY_NO_DIALOGS)
 
 
 if __name__ == "__main__":
 
-    layers = []
+    layers = {'base': '',}
+    OUT_PATH = ""
 
     logging.basicConfig(level=logging.INFO)
     logger = logging.getLogger('ps_macros')
     logger.setLevel(logging.DEBUG)
 
-    create_new_psd(layers, logger)
-
+    create_new_psd(layers, OUT_PATH, logger)  # type: ignore

@@ -19,7 +19,7 @@ LAYER = ['Ambient_Occlusion', 'Glare']
 #        -- renderings
 #        -- vtour
 
-def setup_argparse():
+def setup_argparse() -> argparse.ArgumentParser:
     '''
     Setup and return the argument parser.
     '''
@@ -48,7 +48,7 @@ def setup_argparse():
 
     return parser
 
-def setup_logger(arguments):
+def setup_logger(arguments: argparse.Namespace) -> logging.Logger:
     if arguments.debug:
         logging_level = logging.DEBUG
     elif arguments.verbose or arguments.info:
@@ -62,13 +62,17 @@ def setup_logger(arguments):
 
     return logger
 
-def check_carrier(arguments, logger) -> str:
+def check_carrier(arguments: argparse.Namespace,
+                  logger: logging.Logger) -> str:
+
     if arguments.carrier not in CARRIER:
-        logger.error("Only those carriers are currently supported: %s" % CARRIER)
+        logger.error("Only those carriers are currently supported: %s", CARRIER)
         return ''
+
     return arguments.carrier
 
-def output_info(carrier: str, log):
+def output_info(carrier: str,
+                log: logging.Logger) -> bool:
     '''
     Collect relevant information about the latest
     created folder of the currently selected carrier.
@@ -76,22 +80,33 @@ def output_info(carrier: str, log):
     '''
     search_path = os.path.join(BASE_PATH, carrier, 'renderings')
     search_path = get_latest_entry(search_path)
+
+    if not search_path:
+        log.warning("No renderings entry for %s exists!" % carrier)
+        return False
+
     log.debug("Latest entry is: %s" % os.path.basename(search_path))
-    infos = {'count': 0, 'names': [], 'layers': []}
+    count = 0
+    names = []
+    layer_files = []
+
     with os.scandir(search_path) as it:
         for entry in it:
             if not entry.name.startswith('.') and entry.is_file():
                 segments = entry.name.split('.')
                 if len(segments) > 2:
-                    if not segments[1] in infos['layers']:
-                        infos['layers'].append(segments[1])
+                    if not segments[1] in layer_files:
+                        layer_files.append(segments[1])
                 else:
-                    infos['count'] += 1
-                    infos['names'].append(segments[0])
+                    count += 1
+                    names.append(segments[0])
 
-    log.info("%i Renderings:\nNames: %s\nLayers: %s" % (infos['count'], infos['names'], infos['layers']))
+    log.info("%i Renderings:\nNames: %s\nLayers: %s" % (count,
+                                                        names,
+                                                        layer_files))
+    return True
 
-def get_latest_entry(carrier_path: str):
+def get_latest_entry(carrier_path: str) -> str:
     entry_list = []
     with os.scandir(carrier_path) as it:
         for entry in it:
@@ -99,12 +114,14 @@ def get_latest_entry(carrier_path: str):
                 entry_list.append(entry.path)
 
     if not entry_list:
-        return None
+        return ''
 
     entry_list.sort(reverse=True)
+
     return entry_list[0]
 
-def get_psds(carrier: str, log):
+def get_psds(carrier: str,
+             log: logging.Logger) -> list[os.DirEntry]:
     '''
     Collect .psd file of the provided carrier.
     '''
@@ -113,6 +130,7 @@ def get_psds(carrier: str, log):
 
     with os.scandir(search_path) as it:
         for entry in it:
+            print(type(entry))
             if not entry.name.startswith('.') and entry.is_file():
                 if entry.name.endswith('.psd'):
                     psd_list.append(entry)
@@ -120,11 +138,12 @@ def get_psds(carrier: str, log):
 
     return psd_list
 
-def get_rendered_imgs(carrier: str, log):
+def get_rendered_imgs(carrier: str,
+                      log: logging.Logger) -> dict[str, dict[str, os.DirEntry]]:
     '''
     Collect all images that are in the latest render folder.
     '''
-    file_tree = {}
+    file_tree: dict[str, dict[str, os.DirEntry]] = {}
 
     search_path = os.path.join(BASE_PATH, carrier, 'renderings')
     search_path = get_latest_entry(search_path)
@@ -153,20 +172,20 @@ def get_rendered_imgs(carrier: str, log):
 
     return file_tree
 
-def main():
+def main() -> None:
     parser = setup_argparse()
     args = parser.parse_args()
 
     log = setup_logger(args)
 
-    log.info("Base Path: %s" % BASE_PATH)
-    log.debug("Arguments given: %s" % args)
+    log.info("Base Path: %s", BASE_PATH)
+    log.debug("Arguments given: %s", args)
 
     active_carrier = check_carrier(args, log)
     if not active_carrier:
         log.info("Please provide a correct carrier")
         return
-    log.info("Carrier: %s" % active_carrier)
+    log.info("Carrier: %s", active_carrier)
 
     if args.info:
         output_info(active_carrier, log)
@@ -179,20 +198,20 @@ def main():
         psd_files = get_psds(active_carrier, log)
         for psdfile in psd_files:
             psd_name = os.path.splitext(psdfile.name)[0]
-            print(psd_name)
             ps_macros.update_all_smartlayer(psdfile, renderings[psd_name], log)
 
     elif args.update_backgrounds:
         psd_files = get_psds(active_carrier, log)
         for psdfile in psd_files:
-            ps_macros.update_all_smartlayer(psdfile, renderings, log, True)
+            psd_name = os.path.splitext(psdfile.name)[0]
+            ps_macros.update_all_smartlayer(psdfile, renderings[psd_name], log, True)
 
     elif args.create:
-        for renderfile in renderings:
-            psd_output = os.path.join(BASE_PATH, active_carrier, 'psds')
-            bg_file = backgrounds.get(renderfile, None)
+        for file_key, file_entry in renderings.items():
+            out_path = os.path.join(BASE_PATH, active_carrier, 'psds')
+            bg_file = backgrounds.get(file_key, None)
 
-            status = ps_macros.create_new_psd(renderings[renderfile], psd_output, log, bg_file)
+            status = ps_macros.create_new_psd(file_entry, out_path, log, bg_file)
             if not status:
                 break
 
