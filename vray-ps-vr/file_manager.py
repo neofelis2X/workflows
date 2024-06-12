@@ -5,11 +5,11 @@ import os
 import argparse
 import logging
 
-import local_secrets
+import local_secrets as secrets
 import ps_macros
 
-BASE_PATH = os.path.normpath(local_secrets.BASE_PATH)
-CARRIER = local_secrets.CARRIER
+BASE_PATH = os.path.normpath(secrets.BASE_PATH)
+CARRIER = secrets.CARRIER
 LAYER = ['Ambient_Occlusion', 'Glare']
 
 # File tree is like

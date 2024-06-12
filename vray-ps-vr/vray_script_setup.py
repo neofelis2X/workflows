@@ -1,17 +1,19 @@
 #!/usr/bin/env/ python3
 
 import os.path
-import time
 from datetime import datetime
+import logging
 
 import rhinoscriptsyntax as rs
 import rh8VRay as vray
 
-print("VRay Version: ", vray.Version, "Core: ", vray.VRayVersion)
+import local_secrets as secrets
 
 VRTOUR_RENDERSETTINGS = ""
-OUTPUT_PATH = os.path.normpath(
-              "C:\\Users\\Matthias Kneidinger\\Downloads\\photoshop_python\\test\\")
+BASE_PATH = os.path.normpath(secrets.BASE_PATH)
+CARRIER = secrets.CARRIER
+FILENAME = rs.DocumentName()
+FILEPATH = rs.DocumentPath()
 
 # https://docs.chaos.com/display/VRHINO/V-Ray+Script+Access
 # To use the V-Ray for Rhino wrapper module, add a new Python
@@ -29,56 +31,87 @@ OUTPUT_PATH = os.path.normpath(
 # RE_CUDA   1   Renders on the GPU and/or CPU using CUDA
 # RE_RTX    2   Renders on the GPU using RTX Optix
 
-def render_view():
+def render_view(log: logging.Logger):
     t_start = datetime.now()
-    print(f"Start render at: {t_start}")
+    log.info(f"Start render at: {t_start}")
 
     vray.Render(0, 1, -1)
 
     t_end = datetime.now()
-    print(f"Finished render at: {t_end}")
+    log.info(f"Finished render at: {t_end}")
     diff = t_end - t_start
-    print(f"Render took: {round(diff.total_seconds(), 2)} s")
+    log.info(f"Render took: {round(diff.total_seconds(), 2)} s")
 
     vray.RefreshUI()
 
-def change_save_path(filename: str, fileending: str):
-    path = os.path.join(OUTPUT_PATH, filename + fileending)
-    print(path)
+def change_save_path(filename: str, fileending: str, log: logging.Logger):
+    path = os.path.join(BASE_PATH, filename + fileending)
+    log.debug("Output file path: %s", path)
 
     with vray.Scene.Transaction() as t:
         vray.Scene.SettingsOutput.save_render_path = path
         vray.Scene.SettingsOutput.img_file = path
         vray.Scene.SettingsOutput.img_dir = path
 
-cudaDevices = vray.GetDeviceList(vray.RenderEngines.RE_CUDA)
+def determine_carrier(filename: str, log: logging.Logger) -> str:
+    segments = filename.split('_')
+    carrier = segments[1]
+    if carrier in CARRIER:
+        log.info("Current carrier: ", carrier)
+        return carrier
+    return ''
 
-for device in cudaDevices:
-    print(device.Name)
-    if 'NVIDIA' in device.Name:
-        use = device.UseForRendering
+def get_date_formatted(log: logging.Logger) -> str:
+    current_datetime = datetime.now()
+    current_day_date = current_datetime.strftime("%y%m%d")
+    log.info("Formatted date: %s", current_day_date)
 
-# success = vray.Scene.LoadSettings(VRTOUR_RENDERSETTINGS)
+def main():
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s: %(name)s: %(levelname)s: %(message)s')
+    logger = logging.getLogger('vray-mang')
 
-params = vray.Scene.SettingsOutput.ParamNames
-for par in params:
-    pass
-    #print(par)
 
-with vray.Scene.Transaction() as tr:
-    vray.Scene.SettingsOutput.img_width = 800
-    vray.Scene.SettingsOutput.img_height = 400
-    vray.Scene.SettingsOutput.save_render = 1
-    vray.Scene.SettingsOutput.img_noAlpha = 0
+    logger.info("VRay Version: %s, Core: %s", vray.Version, vray.VRayVersion)
 
-success = vray.SetDeviceList(vray.RenderEngines.RE_CUDA, [0, 1])
+    cudaDevices = vray.GetDeviceList(vray.RenderEngines.RE_CUDA)
 
-views = rs.NamedViews()
-if views:
-    for view in views:
-        print(f"Current view: {view}")
-        change_save_path(view, '.png')
-        rs.RestoreNamedView(view)
-        rs.Redraw()
-        render_view()
+    for device in cudaDevices:
+        logger.debug("Found render device: %s", device.Name)
+        if 'NVIDIA' in device.Name:
+            use = device.UseForRendering
 
+    # success = vray.Scene.LoadSettings(VRTOUR_RENDERSETTINGS)
+
+    params = vray.Scene.SettingsOutput.ParamNames
+    for par in params:
+        pass
+        #print(par)
+
+    with vray.Scene.Transaction() as tr:
+        vray.Scene.SettingsOutput.img_width = 800
+        vray.Scene.SettingsOutput.img_height = 400
+        vray.Scene.SettingsOutput.save_render = 1
+        vray.Scene.SettingsOutput.img_noAlpha = 0
+
+    success = vray.SetDeviceList(vray.RenderEngines.RE_CUDA, [0, 1])
+
+    views = rs.NamedViews()
+    if views:
+        for view in views:
+            logger.debug("Current view: %s", view)
+            change_save_path(view, '.png', logger)
+            rs.RestoreNamedView(view)
+            rs.Redraw()
+            render_view(logger)
+
+main()
+
+if __name__ == "__main__":
+
+    logging.basicConfig(level=logging.INFO)
+    logger = logging.getLogger('vray-mang')
+    logger.setLevel(logging.DEBUG)
+
+    get_date_formatted(logger)
