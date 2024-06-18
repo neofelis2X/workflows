@@ -1,4 +1,16 @@
 #!/usr/bin/env/ python3
+'''
+Author: Matthias Kneidinger
+Copyright: 2024, GPLv3
+
+Command line tool to create and update photoshop files
+for specific carrier. Automatically picks up the latest
+renderings. Run with --help to get more information.
+
+local_secrets: Carrier names, base path and settings file
+path have to be provided via the local_secrets module
+as string constants.
+'''
 
 import os.path
 import os
@@ -12,14 +24,7 @@ BASE_PATH = os.path.normpath(secrets.BASE_PATH)
 CARRIER = secrets.CARRIER
 LAYER = ['Ambient_Occlusion', 'Glare']
 
-# File tree is like
-# -- BASE_PATH
-#    -- CARRIER
-#        -- psds
-#        -- renderings
-#        -- vtour
-
-def setup_argparse() -> argparse.ArgumentParser:
+def _setup_argparse() -> argparse.ArgumentParser:
     '''
     Setup and return the argument parser.
     '''
@@ -48,7 +53,7 @@ def setup_argparse() -> argparse.ArgumentParser:
 
     return parser
 
-def setup_logger(arguments: argparse.Namespace) -> logging.Logger:
+def _setup_logger(arguments: argparse.Namespace) -> logging.Logger:
     if arguments.debug:
         logging_level = logging.DEBUG
     elif arguments.verbose or arguments.info:
@@ -62,7 +67,7 @@ def setup_logger(arguments: argparse.Namespace) -> logging.Logger:
 
     return logger
 
-def check_carrier(arguments: argparse.Namespace,
+def _check_carrier(arguments: argparse.Namespace,
                   logger: logging.Logger) -> str:
 
     if arguments.carrier not in CARRIER:
@@ -71,7 +76,7 @@ def check_carrier(arguments: argparse.Namespace,
 
     return arguments.carrier
 
-def output_info(carrier: str,
+def _output_info(carrier: str,
                 log: logging.Logger) -> bool:
     '''
     Collect relevant information about the latest
@@ -79,7 +84,7 @@ def output_info(carrier: str,
     Output the information via logs.
     '''
     search_path = os.path.join(BASE_PATH, carrier, 'renderings')
-    search_path = get_latest_entry(search_path)
+    search_path = _get_latest_entry(search_path)
 
     if not search_path:
         log.warning("No renderings entry for %s exists!" % carrier)
@@ -106,7 +111,7 @@ def output_info(carrier: str,
                                                         layer_files))
     return True
 
-def get_latest_entry(carrier_path: str) -> str:
+def _get_latest_entry(carrier_path: str) -> str:
     entry_list = []
     with os.scandir(carrier_path) as it:
         for entry in it:
@@ -120,7 +125,7 @@ def get_latest_entry(carrier_path: str) -> str:
 
     return entry_list[0]
 
-def get_psds(carrier: str,
+def _get_psds(carrier: str,
              log: logging.Logger) -> list[os.DirEntry]:
     '''
     Collect .psd file of the provided carrier.
@@ -130,7 +135,6 @@ def get_psds(carrier: str,
 
     with os.scandir(search_path) as it:
         for entry in it:
-            print(type(entry))
             if not entry.name.startswith('.') and entry.is_file():
                 if entry.name.endswith('.psd'):
                     psd_list.append(entry)
@@ -138,7 +142,7 @@ def get_psds(carrier: str,
 
     return psd_list
 
-def get_rendered_imgs(carrier: str,
+def _get_rendered_imgs(carrier: str,
                       log: logging.Logger) -> dict[str, dict[str, os.DirEntry]]:
     '''
     Collect all images that are in the latest render folder.
@@ -146,7 +150,7 @@ def get_rendered_imgs(carrier: str,
     file_tree: dict[str, dict[str, os.DirEntry]] = {}
 
     search_path = os.path.join(BASE_PATH, carrier, 'renderings')
-    search_path = get_latest_entry(search_path)
+    search_path = _get_latest_entry(search_path)
 
     if not search_path:
         log.warning("No renderings entry for %s exists!" % carrier)
@@ -173,35 +177,40 @@ def get_rendered_imgs(carrier: str,
     return file_tree
 
 def main() -> None:
-    parser = setup_argparse()
+    '''
+    Run certain functions for the specified carrier
+    based on the provided command line arguments.
+    '''
+
+    parser = _setup_argparse()
     args = parser.parse_args()
 
-    log = setup_logger(args)
+    log = _setup_logger(args)
 
     log.info("Base Path: %s", BASE_PATH)
     log.debug("Arguments given: %s", args)
 
-    active_carrier = check_carrier(args, log)
+    active_carrier = _check_carrier(args, log)
     if not active_carrier:
         log.info("Please provide a correct carrier")
         return
     log.info("Carrier: %s", active_carrier)
 
     if args.info:
-        output_info(active_carrier, log)
+        _output_info(active_carrier, log)
         return
 
-    renderings = get_rendered_imgs(active_carrier, log)
-    backgrounds = get_rendered_imgs('BACKGROUNDS', log)
+    renderings = _get_rendered_imgs(active_carrier, log)
+    backgrounds = _get_rendered_imgs('BACKGROUNDS', log)
 
     if args.update:
-        psd_files = get_psds(active_carrier, log)
+        psd_files = _get_psds(active_carrier, log)
         for psdfile in psd_files:
             psd_name = os.path.splitext(psdfile.name)[0]
             ps_macros.update_all_smartlayer(psdfile, renderings[psd_name], log)
 
     elif args.update_backgrounds:
-        psd_files = get_psds(active_carrier, log)
+        psd_files = _get_psds(active_carrier, log)
         for psdfile in psd_files:
             psd_name = os.path.splitext(psdfile.name)[0]
             ps_macros.update_all_smartlayer(psdfile, renderings[psd_name], log, True)

@@ -1,3 +1,10 @@
+[tool.pylint.MASTER]
+ignore = [
+"pylintrc.toml",
+"LICENSE",
+"README.md"
+]
+
 [tool.pylint.format]
 # Expected format of line ending, e.g. empty (any line ending), LF or CRLF.
 # expected-line-ending-format = LF
@@ -40,7 +47,8 @@ disable = [
 "use-implicit-booleaness-not-comparison-to-string",
 "use-implicit-booleaness-not-comparison-to-zero",
 "consider-using-f-string",
-"trailing-newlines"
+"trailing-newlines",
+"import-error"
 ]
 
 [tool.pylint.reports]

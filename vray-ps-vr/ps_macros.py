@@ -1,11 +1,39 @@
 #!/usr/bin/env/ python3
 # mypy: disable-error-code="attr-defined"
 
+'''
+Author: Matthias Kneidinger
+Copyright: 2024, GPLv3
+
+This module provides functions to connect to photoshop
+and run certain actions inside it.
+
+Warnings
+--------
+This module uses win32 and only works on windows.
+make sure to: pip install pywin32
+
+See Also
+--------
+https://github.com/lohriialo/photoshop-scripting-python
+
+Functions
+---------
+update_all_smartlayer()
+    Opens a psd file, searches for specified group name
+    and layer name and then replaces the layer with the
+    latest available rendering
+create_new_psd()
+    Collects rendering files from the base path, creates
+    a new file with smart object layers and inserts the
+    renderings with the correct settings
+
+'''
+
 import os.path
 import logging
 from typing import Optional, Callable
 
-# pip install pywin32
 import win32com.client as win32
 from pywintypes import com_error  # pylint: disable=E0611
 
@@ -19,9 +47,28 @@ PS_BLEND_MODE_SCREEN = 9
 PS_BLEND_MODE_MULTIPLY = 5
 PS_PHOTOSHOP_SAVE = 1
 
-def update_all_smartlayer(psd_file: os.DirEntry, img_layers: dict[str, os.DirEntry],
+def update_all_smartlayer(psd_file: os.DirEntry,
+                          img_layers: dict[str, os.DirEntry],
                           log: logging.Logger,
                           background: bool = False) -> bool:
+    '''
+    Replace the images of all specified smart object layers
+
+    Parameters
+    ----------
+    psd_file: os.DirEntry
+        Which psd to update
+    img_layers: dict[str, os.DirEntry]
+        A dictionary with different layers of a rendering
+    log: logging.Logger
+    background: bool = False
+        If True, updates the background group, otherwise
+        the main content group
+
+    Returns
+    -------
+    bool
+    '''
 
     app = _prepare_photoshop(log)
     if not app:
@@ -55,9 +102,27 @@ def update_all_smartlayer(psd_file: os.DirEntry, img_layers: dict[str, os.DirEnt
 
     return True
 
-def create_new_psd(img_layers: dict[str, os.DirEntry], output_path: str,
+def create_new_psd(img_layers: dict[str, os.DirEntry],
+                   output_path: str,
                    log: logging.Logger,
                    bg_layers: Optional[dict[str, os.DirEntry]] = None) -> bool:
+    '''
+    Creates a new psd file in the right directory based
+    on the latest rendered images
+
+    Parameters
+    ----------
+    img_layers: dict[str, os.DirEntry]
+        A dictionary with different layers of a rendering
+    output_path: str
+    log: logging.Logger
+    bg_layers: Optional[dict[str, os.DirEntry]]
+        Also add a background group to the psd file
+
+    Returns
+    -------
+    bool
+    '''
 
     app = _prepare_photoshop(log)
     if not app:

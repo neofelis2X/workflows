@@ -1,4 +1,39 @@
 #!/usr/bin/env/ python3
+'''
+Author: Matthias Kneidinger
+Copyright: 2024, GPLv3
+
+This script is intended to run inside Rhino3D and access the VRay
+rendering module.
+Carrier names, base path and settings file path have to be provided
+via the local_secrets module as string constants.
+The script checks which vendor/carrier is currently loaded. Then checks
+the latest folder with renderings and creates a new folder.
+Loads the specified render settings.
+Then it lists all saved views that start with 'r_' and renders them
+to the created folder.
+
+https://docs.chaos.com/display/VRHINO/V-Ray+Script+Access
+To use the V-Ray for Rhino wrapper module, add a new Python
+Module Search path (Tools/Options/Python 3) pointing to:
+"C:\\Program Files\\Chaos Group\\V-Ray\\V-Ray for Rhinoceros"
+
+RenderModes
+RM_PRODUCTION     0   Renders in production mode
+RM_INTERACTIVE    1   Renders in interactive mode
+RM_CLOUD          2   Starts the current render job on the Cloud
+RM_LAST           3   Repeats the last render
+
+RenderEngines
+RE_CPU    0   Renders on the CPU
+RE_CUDA   1   Renders on the GPU and/or CPU using CUDA
+RE_RTX    2   Renders on the GPU using RTX Optix
+
+Functions
+---------
+render_scene(bool)
+    Runs the whole script
+'''
 
 import os.path
 from datetime import datetime
@@ -15,23 +50,7 @@ CARRIER = secrets.CARRIER
 FILENAME = rs.DocumentName()
 FILEPATH = rs.DocumentPath()
 
-# https://docs.chaos.com/display/VRHINO/V-Ray+Script+Access
-# To use the V-Ray for Rhino wrapper module, add a new Python
-# Module Search path (Tools/Options/Python 3) pointing to:
-# C:\Program Files\Chaos Group\V-Ray\V-Ray for Rhinoceros
-
-# RenderModes
-# RM_PRODUCTION     0   Renders in production mode
-# RM_INTERACTIVE    1   Renders in interactive mode
-# RM_CLOUD          2   Starts the current render job on the Cloud
-# RM_LAST           3   Repeats the last render
-
-# RenderEngines
-# RE_CPU    0   Renders on the CPU
-# RE_CUDA   1   Renders on the GPU and/or CPU using CUDA
-# RE_RTX    2   Renders on the GPU using RTX Optix
-
-def setup_logging(dir_path: str) -> logging.Logger:
+def _setup_logging(dir_path: str) -> logging.Logger:
     logger = logging.getLogger('vray-mang')
     logger.setLevel(logging.DEBUG)
 
@@ -47,14 +66,17 @@ def setup_logging(dir_path: str) -> logging.Logger:
 
     return logger
 
-def close_logging(log: logging.Logger) -> None:
+def _close_logging(log: logging.Logger) -> None:
     log.debug("Closing logger, final message.")
 
     for handler in log.handlers:
         log.removeHandler(handler)
         handler.close()
 
-def render_view(log: logging.Logger):
+def _render_view(view: str, log: logging.Logger) -> None:
+    rs.RestoreNamedView(view)
+    rs.Redraw()
+
     t_start = datetime.now()
     log.info(f"Start render at: {t_start}")
 
@@ -67,7 +89,7 @@ def render_view(log: logging.Logger):
 
     vray.RefreshUI()
 
-def change_save_path(dirpath: str, filename: str, fileending: str, log: logging.Logger):
+def _change_save_path(dirpath: str, filename: str, fileending: str, log: logging.Logger) -> None:
     path = os.path.join(dirpath, filename + fileending)
     log.info("Output file name: %s", filename)
     log.debug("Output file path: %s", path)
@@ -77,31 +99,31 @@ def change_save_path(dirpath: str, filename: str, fileending: str, log: logging.
         vray.Scene.SettingsOutput.img_file = path
         vray.Scene.SettingsOutput.img_dir = path
 
-def determine_carrier(filename: str) -> str:
+def _determine_carrier(filename: str) -> str:
     segments = filename.split('_')
     carrier = segments[1]
 
-    if carrier in CARRIER:
-        return carrier
-    
-    return ''
+    if not carrier in CARRIER:
+        return ''
 
-def get_date_formatted() -> str:
+    return carrier
+
+def _get_date_formatted() -> str:
     current_datetime = datetime.now()
     current_day_date = current_datetime.strftime("%y%m%d")
-    
+
     return current_day_date
 
-def get_output_path() -> str:
+def _get_output_path() -> str:
     index = 0
-    carrier = determine_carrier(FILENAME)
+    carrier = _determine_carrier(FILENAME)
     if not carrier:
         print("ERROR: Could not determine a valid carrier.")
         return ''
-    else:
-        print("INFO: Current carrier is: ", carrier )
 
-    current_date = get_date_formatted()
+    print("INFO: Current carrier is: ", carrier )
+
+    current_date = _get_date_formatted()
     out_dir = ''.join((current_date, 'v', str(index)))
     out_path = os.path.join(BASE_PATH, carrier, 'renderings', out_dir)
 
@@ -115,11 +137,11 @@ def get_output_path() -> str:
     return out_path
 
 def _determine_version_number(carrier: str) -> int:
-        latest_dir = get_latest_entry(os.path.join(BASE_PATH, carrier, 'renderings'))
-        latest_index = int(latest_dir[7])
-        return latest_index + 1
+    latest_dir = _get_latest_entry(os.path.join(BASE_PATH, carrier, 'renderings'))
+    latest_index = int(latest_dir[7])
+    return latest_index + 1
 
-def get_latest_entry(path: str) -> str:
+def _get_latest_entry(path: str) -> str:
     entry_list = []
     with os.scandir(path) as it:
         for entry in it:
@@ -133,25 +155,43 @@ def get_latest_entry(path: str) -> str:
 
     return entry_list[0]
 
-def get_renderfile_name(viewname: str) -> str:
+def _get_renderfile_name(viewname: str) -> str:
     segments = viewname.split('_')
     return segments[2]
 
-def main():
+def render_scene(do_render: bool = False) -> bool:
+    '''
+    Create a new directory for today and render
+    all views that are marked with 'r_'.
+
+    Parameters
+    ----------
+    do_render : bool
+        Set to false to skip the actual rendering step, useful for testing
+
+    Returns
+    -------
+    bool
+        True on success, False on error
+    '''
     print('Starting rendering script. Logging to file.')
 
-    path = get_output_path()
+    path = _get_output_path()
+    if not path:
+        return False
+
     os.mkdir(path)
 
-    logger = setup_logging(path)
+    logger = _setup_logging(path)
     logger.info("VRay Version: %s, Core: %s", vray.Version, vray.VRayVersion)
 
-    cudaDevices = vray.GetDeviceList(vray.RenderEngines.RE_CUDA)
+    cuda_devices = vray.GetDeviceList(vray.RenderEngines.RE_CUDA)
 
-    for device in cudaDevices:
+    for device in cuda_devices:
         logger.info("Found render device: %s", device.Name)
         if 'NVIDIA' in device.Name:
             use = device.UseForRendering
+            logger.debug("Device is marked for use: %s - %s", device.Name, use)
 
     success = vray.Scene.LoadSettings(VRTOUR_RENDERSETTINGS)
     if success:
@@ -172,21 +212,21 @@ def main():
     success = vray.SetDeviceList(vray.RenderEngines.RE_CUDA, [0, 1])
 
     views = rs.NamedViews()
-    if views:
+    if views and do_render:
         for view in views:
             if view.startswith('r_'):
                 logger.info("Current view: %s", view)
-                out_name = get_renderfile_name(view)
-                change_save_path(path, out_name, '.png', logger)
-                rs.RestoreNamedView(view)
-                rs.Redraw()
-                render_view(logger)
-    
-    
-    close_logging(logger)
-    print('Finishing rendering script.')
+                out_name = _get_renderfile_name(view)
+                _change_save_path(path, out_name, '.png', logger)
+                _render_view(view, logger)
 
-main()
+
+    _close_logging(logger)
+    print('Finishing rendering script.')
+    return True
+
+render_scene(True)
+
 
 if __name__ == "__main__":
     pass
