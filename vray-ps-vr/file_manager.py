@@ -158,7 +158,10 @@ def _get_rendered_imgs(carrier: str,
 
     with os.scandir(search_path) as it:
         for entry in it:
-            if not entry.name.startswith('.') and entry.is_file():
+            if not entry.name.startswith('.') and \
+            entry.is_file() and \
+            entry.name.endswith('.png'):  # currently we render in png anyway
+
                 segments = entry.name.split('.')
 
                 if segments[0] not in file_tree:
@@ -175,6 +178,19 @@ def _get_rendered_imgs(carrier: str,
     log.info("Collected %i render files." % len(file_tree))
 
     return file_tree
+
+def _update_vrtour(carrier: str, log: logging.Logger):
+    # This is a prototype
+    pass
+
+    # locate psd files of carrier and save them as jpeg
+    # locate vrtour on server an backup the panos folder
+    # copy jpeg files to a temp directory on the harddrive (not network)
+    # create a new vrtour with the needed settings using krpano
+    # copy the new panos folder into the tour on the server
+    # purge the temp folder
+    # open the folder the contain the vrtour in explorer
+    # delete old panos folder by hand?
 
 def main() -> None:
     '''
@@ -223,6 +239,9 @@ def main() -> None:
             status = ps_macros.create_new_psd(file_entry, out_path, log, bg_file)
             if not status:
                 break
+
+            log.info("Created psd-file: %s", os.path.basename(out_path))
+        log.info("All psd-files are done")
 
 
 if __name__ == "__main__":

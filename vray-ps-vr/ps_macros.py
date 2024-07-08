@@ -168,12 +168,16 @@ def _prepare_photoshop(log: logging.Logger) -> Optional[Callable]:
     try:
         app = win32.gencache.EnsureDispatch("Photoshop.Application")
     except com_error:
-        log.warning("Couldn't access Photoshop. Please make sure that the application is running!")
+        log.warning("Photoshop Error: Couldn't access Photoshop. Please make sure that the application is running.")
         return None
 
     log.debug("Successfully attached photoshop.")
 
-    app.DisplayDialogs = PS_DISPLAY_NO_DIALOGS
+    try:
+        app.DisplayDialogs = PS_DISPLAY_NO_DIALOGS
+    except com_error:
+        log.warning("Photoshop Error: Please make sure that photoshop is running and that you are logged in.")
+        return None
 
     return app
 

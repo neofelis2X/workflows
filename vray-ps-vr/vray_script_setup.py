@@ -44,7 +44,8 @@ import rh8VRay as vray
 
 import local_secrets as secrets
 
-VRTOUR_RENDERSETTINGS = os.path.normpath(secrets.SETTINGS_PATH)
+VR_RENDERSETTINGS = os.path.normpath(secrets.VR_SETTINGS_PATH)
+NORMAL_RENDERSETTINGS = os.path.normpath(secrets.STD_SETTINGS_PATH)
 BASE_PATH = os.path.normpath(secrets.BASE_PATH)
 CARRIER = secrets.CARRIER
 FILENAME = rs.DocumentName()
@@ -91,7 +92,7 @@ def _render_view(view: str, log: logging.Logger) -> None:
 
 def _change_save_path(dirpath: str, filename: str, fileending: str, log: logging.Logger) -> None:
     path = os.path.join(dirpath, filename + fileending)
-    log.info("Output file name: %s", filename)
+    log.info("Output file name: %s", filename + fileending)
     log.debug("Output file path: %s", path)
 
     with vray.Scene.Transaction() as t:
@@ -159,6 +160,27 @@ def _get_renderfile_name(viewname: str) -> str:
     segments = viewname.split('_')
     return segments[2]
 
+def _restore_layer_state(state: str) -> bool:
+    # RestoreLayerState currently does not work in Rh8!
+    plugin = rs.GetPlugInObject("Rhino Bonus Tools")
+    print(plugin)
+    if plugin is not None:
+        # plugin.RestoreLayerState(state, 0)
+        return True
+    else :
+        return False
+
+def _load_vray_settings(filepath: str, log: logging.Logger) -> bool:
+    success = vray.Scene.LoadSettings(filepath)
+    filename = os.path.basename(filepath)
+
+    if not success:
+        log.debug("Failed to load settings file: %s", filename)
+        return False
+
+    log.debug("Successfully loaded settings file: %s", filename)
+    return True
+
 def render_scene(do_render: bool = False) -> bool:
     '''
     Create a new directory for today and render
@@ -189,44 +211,43 @@ def render_scene(do_render: bool = False) -> bool:
 
     for device in cuda_devices:
         logger.info("Found render device: %s", device.Name)
-        if 'NVIDIA' in device.Name:
+        if 'NVIDIA' in device.Name or 'CPU' in device.Name:
             use = device.UseForRendering
             logger.debug("Device is marked for use: %s - %s", device.Name, use)
 
-    success = vray.Scene.LoadSettings(VRTOUR_RENDERSETTINGS)
-    if success:
-        logger.debug("Successfully loaded settings file.")
-    else:
-        logger.debug("Failed to load settings file.")
+    _load_vray_settings(VR_RENDERSETTINGS, logger)
 
     #params = vray.Scene.SettingsOutput.ParamNames
     #for par in params:
     #    print(par)
 
     with vray.Scene.Transaction() as tr:
-        vray.Scene.SettingsOutput.img_width = 384
-        vray.Scene.SettingsOutput.img_height = 64
+        #vray.Scene.SettingsOutput.img_width = 384
+        #vray.Scene.SettingsOutput.img_height = 64
         vray.Scene.SettingsOutput.save_render = 1
         vray.Scene.SettingsOutput.img_noAlpha = 0
 
     success = vray.SetDeviceList(vray.RenderEngines.RE_CUDA, [0, 1])
 
+    _restore_layer_state('ex')
+
     views = rs.NamedViews()
-    if views and do_render:
+    if views:
         for view in views:
-            if view.startswith('r_'):
-                logger.info("Current view: %s", view)
+            if view.startswith('r_') and '_in_' in view:
+                logger.info("Setting up view: %s", view)
                 out_name = _get_renderfile_name(view)
                 _change_save_path(path, out_name, '.png', logger)
-                _render_view(view, logger)
+                if do_render:
+                    _render_view(view, logger)
 
-
+    _load_vray_settings(NORMAL_RENDERSETTINGS, logger)
     _close_logging(logger)
     print('Finishing rendering script.')
     return True
 
 render_scene(True)
-
+# _restore_layer_state('str')
 
 if __name__ == "__main__":
     pass
