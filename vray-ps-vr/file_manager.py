@@ -14,8 +14,12 @@ as string constants.
 
 import os.path
 import os
+import subprocess
+import time
+import shutil
 import argparse
 import logging
+import tempfile
 
 import local_secrets as secrets
 import ps_macros
@@ -143,7 +147,7 @@ def _get_psds(carrier: str,
     return psd_list
 
 def _get_rendered_imgs(carrier: str,
-                      log: logging.Logger) -> dict[str, dict[str, os.DirEntry]]:
+                       log: logging.Logger) -> dict[str, dict[str, os.DirEntry]]:
     '''
     Collect all images that are in the latest render folder.
     '''
@@ -179,9 +183,89 @@ def _get_rendered_imgs(carrier: str,
 
     return file_tree
 
-def _update_vrtour(carrier: str, log: logging.Logger):
-    # This is a prototype
-    pass
+def _create_local_vrtour(image_list,
+                         log: logging.Logger,
+                         krpano_stdout: bool = False):
+
+    KRPANO_PATH = "c:\\Program Files\\krpano"
+    krpano_exe = os.path.join(KRPANO_PATH, 'krpanotools.exe')
+    krpano_config = os.path.join(KRPANO_PATH, 'templates', 'vtour-normal.config')
+
+    process_return = subprocess.run([krpano_exe,
+                                     'makepano',
+                                     'config=',
+                                     krpano_config,
+                                     *image_list],
+                                     shell=False,
+                                     capture_output=True)
+
+    if krpano_stdout:
+        log.info(process_return.stdout.decode())
+
+def _save_psds_as_jpgs(carrier: str,
+                     log: logging.Logger) -> list[str]:
+
+    psd_files = _get_psds(carrier, log)
+    jpgs_remote = []
+
+    jpeg_dir = os.path.join(BASE_PATH, carrier, 'psds', 'JPEG')
+
+    if not os.path.isdir(jpeg_dir):
+        os.mkdir(jpeg_dir)
+
+    for psd in psd_files:
+        jpgs_remote.append(ps_macros.save_jpeg(psd, log, jpeg_dir))
+
+    return jpgs_remote
+
+def _get_jpgs(carrier: str,
+              log: logging.Logger) -> list[str]:
+    '''
+    Collect .jpg files of the provided carrier.
+    '''
+    jpg_list = []
+    search_path = os.path.join(BASE_PATH, carrier, 'psds', 'JPEG')
+
+    with os.scandir(search_path) as it:
+        for entry in it:
+            if not entry.name.startswith('.') and entry.is_file():
+                if entry.name.endswith('.jpg'):
+                    jpg_list.append(entry)
+                    log.debug('Found file: %s' % entry.name)
+
+    return jpg_list
+
+def _copy_vtour_to_remote(carrier: str,
+                          log: logging.Logger,
+                          temp_dir: str):
+
+    vtour_dir = os.path.join(temp_dir, 'vtour')
+    remote_dir = os.path.join(BASE_PATH, carrier, 'vtour')
+
+    if os.listdir(remote_dir):
+        log.error('Attention: The vtour directory must be empty, to copy a' \
+                  ' new tour there. Please make sure there are no files in it!')
+    else:
+        shutil.copytree(vtour_dir, remote_dir, dirs_exist_ok=True)
+        log.info('Successfully copied the the new tour.')
+
+def _new_vrtour_to_remote(carrier: str,
+                          log: logging.Logger,
+                          save_jpgs: bool = False):
+
+    if save_jpgs:
+        jpgs_remote = _save_psds_as_jpgs(carrier, log)
+    else:
+        jpgs_remote = _get_jpgs(carrier, log)
+
+    jpgs_local = []
+    with tempfile.TemporaryDirectory() as tmpdir:
+        for jpg in jpgs_remote:
+            shutil.copy2(jpg, tmpdir)
+            jpgs_local.append(os.path.join(tmpdir, os.path.basename(jpg)))
+
+        _create_local_vrtour(jpgs_local, log, False)
+        _copy_vtour_to_remote(carrier, log, tmpdir)
 
     # locate psd files of carrier and save them as jpeg
     # locate vrtour on server an backup the panos folder
@@ -191,6 +275,11 @@ def _update_vrtour(carrier: str, log: logging.Logger):
     # purge the temp folder
     # open the folder the contain the vrtour in explorer
     # delete old panos folder by hand?
+
+def _update_vrtour_on_remote(carrier: str,
+                             log: logging.Logger):
+
+    pass
 
 def main() -> None:
     '''
@@ -245,5 +334,10 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    # main()
 
+    logging.basicConfig(level=logging.INFO)
+    logger = logging.getLogger('ps_macros')
+    logger.setLevel(logging.DEBUG)
+
+    _new_vrtour_to_remote('SAAR', logger, True)

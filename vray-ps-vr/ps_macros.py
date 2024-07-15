@@ -46,6 +46,56 @@ PS_DISPLAY_NO_DIALOGS = 3
 PS_BLEND_MODE_SCREEN = 9
 PS_BLEND_MODE_MULTIPLY = 5
 PS_PHOTOSHOP_SAVE = 1
+PS_LOWERCASE = 2
+PS_JPEG_SAVE = 6
+PS_NO_MATTE = 1
+PS_WHITE_MATTE = 4
+PS_OPTIMIZED_BASELINE = 2
+
+def save_jpeg(psd_file: os.DirEntry,
+              log: logging.Logger,
+              output_dir: str = '') -> str:
+
+    '''
+    Saves a given .psd as a .jpg.
+    JPEG options are static for this usecase.
+
+    Parameters
+    ----------
+    psd_file: os.DirEntry
+        Which psd to save as jpeg
+    log: logging.Logger
+    output_dir: str
+        Optional output directory path
+        Otherwise same as input path
+
+    Returns
+    -------
+    None
+    '''
+
+    app = _prepare_photoshop(log)
+    if not app:
+        return ''
+
+    if output_dir:
+        output_file = os.path.join(output_dir, psd_file.name[:-4] + '.jpg')
+    else:
+        output_file = psd_file.path[:-4] + '.jpg'
+
+    jpeg_options = win32.gencache.EnsureDispatch('Photoshop.JPEGSaveOptions')
+    jpeg_options.EmbedColorProfile = True
+    jpeg_options.FormatOptions = PS_OPTIMIZED_BASELINE
+    jpeg_options.Matte = PS_WHITE_MATTE
+    jpeg_options.Quality = 12
+
+    doc = app.Open(psd_file.path)
+    doc.SaveAs(output_file, jpeg_options, AsCopy=True, ExtensionType=PS_LOWERCASE)
+    log.debug("Saved file: %s" % output_file)
+    doc.Close()
+
+    return output_file
+
 
 def update_all_smartlayer(psd_file: os.DirEntry,
                           img_layers: dict[str, os.DirEntry],
@@ -149,10 +199,10 @@ def create_new_psd(img_layers: dict[str, os.DirEntry],
     doc_ref = app.Documents.Add(width, height, 72.0, filename)
     log.debug("Created new document in photoshop with the name: '%s'" % filename)
 
-    _insert_render_stack(app, doc_ref, img_layers, 'content', log)
-
     if bg_layers:
         _insert_render_stack(app, doc_ref, bg_layers, 'background', log)
+
+    _insert_render_stack(app, doc_ref, img_layers, 'content', log)
 
     doc_ref.SaveAs(output_path)
     doc_ref.Close()
@@ -233,11 +283,22 @@ def _replace_image_smart_layer(app: Callable, new_img_path: str) -> None:
 
 if __name__ == "__main__":
 
-    layers = {'base': '',}
-    OUT_PATH = ""
+    test_file = '\\\\192.168.0.137\\office\\Projects\\240425_Tramtrain_Innotr\\grafik\\05_VR-Touren\\SAAR\\psds\\b.psd'
+    out = "\\\\192.168.0.137\\office\\Projects\\200922_Stadler_VDV\\grafik\\02_Layout\\OUT_alle\\JPGs"
+    out = os.path.normpath(out)
 
     logging.basicConfig(level=logging.INFO)
     logger = logging.getLogger('ps_macros')
     logger.setLevel(logging.DEBUG)
 
-    create_new_psd(layers, OUT_PATH, logger)  # type: ignore
+    class PseudoDirEntry:
+        def __init__(self, path):
+            import os
+            self.path = os.path.realpath(path)
+            self.name = os.path.basename(self.path)
+            self.is_dir = os.path.isdir(self.path)
+            self.stat = lambda: os.stat(self.path)
+
+    test_entry = PseudoDirEntry(test_file)
+    # create_new_psd(layers, OUT_PATH, logger)  # type: ignore
+    save_jpeg(test_entry, logger, out)
