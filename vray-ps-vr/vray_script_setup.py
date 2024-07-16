@@ -167,8 +167,7 @@ def _restore_layer_state(state: str) -> bool:
     if plugin is not None:
         # plugin.RestoreLayerState(state, 0)
         return True
-    else :
-        return False
+    return False
 
 def _load_vray_settings(filepath: str, log: logging.Logger) -> bool:
     success = vray.Scene.LoadSettings(filepath)
@@ -234,7 +233,7 @@ def render_scene(do_render: bool = False) -> bool:
     views = rs.NamedViews()
     if views:
         for view in views:
-            if view.startswith('r_') and '_in_' in view:
+            if view.startswith('r_') and '_ex_' in view:
                 logger.info("Setting up view: %s", view)
                 out_name = _get_renderfile_name(view)
                 _change_save_path(path, out_name, '.png', logger)

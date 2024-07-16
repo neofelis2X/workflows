@@ -30,6 +30,7 @@ create_new_psd()
 
 '''
 
+import os
 import os.path
 import logging
 from typing import Optional, Callable
@@ -77,11 +78,25 @@ def save_jpeg(psd_file: os.DirEntry,
     app = _prepare_photoshop(log)
     if not app:
         return ''
+    doc = app.Open(psd_file.path)
 
     if output_dir:
-        output_file = os.path.join(output_dir, psd_file.name[:-4] + '.jpg')
+        output_path = os.path.join(output_dir, psd_file.name[:-4] + '.jpg')
     else:
-        output_file = psd_file.path[:-4] + '.jpg'
+        output_path = psd_file.path[:-4] + '.jpg'
+
+    _save_as_jpg(doc, output_path, log)
+
+    doc.Close()
+
+    return output_path
+
+def _save_as_jpg(ps_doc,
+                 output_file_path,
+                 log: logging.Logger) -> None:
+
+    if not os.path.isdir(os.path.dirname(output_file_path)):
+        os.mkdir(os.path.dirname(output_file_path))
 
     jpeg_options = win32.gencache.EnsureDispatch('Photoshop.JPEGSaveOptions')
     jpeg_options.EmbedColorProfile = True
@@ -89,13 +104,8 @@ def save_jpeg(psd_file: os.DirEntry,
     jpeg_options.Matte = PS_WHITE_MATTE
     jpeg_options.Quality = 12
 
-    doc = app.Open(psd_file.path)
-    doc.SaveAs(output_file, jpeg_options, AsCopy=True, ExtensionType=PS_LOWERCASE)
-    log.debug("Saved file: %s" % output_file)
-    doc.Close()
-
-    return output_file
-
+    ps_doc.SaveAs(output_file_path, jpeg_options, AsCopy=True, ExtensionType=PS_LOWERCASE)
+    log.debug("Saved file: %s" % output_file_path)
 
 def update_all_smartlayer(psd_file: os.DirEntry,
                           img_layers: dict[str, os.DirEntry],
@@ -148,6 +158,11 @@ def update_all_smartlayer(psd_file: os.DirEntry,
             _replace_image_smart_layer(app, img_layers['Ambient_Occlusion'].path)
 
     doc.Save()
+
+    output_name = psd_file.name[:-4] + '.jpg'
+    output_path = os.path.join(os.path.dirname(psd_file.path), 'JPEG', output_name)
+    _save_as_jpg(doc, output_path, log)
+
     doc.Close()
 
     return True
@@ -205,6 +220,10 @@ def create_new_psd(img_layers: dict[str, os.DirEntry],
     _insert_render_stack(app, doc_ref, img_layers, 'content', log)
 
     doc_ref.SaveAs(output_path)
+
+    output_jpg = os.path.join(output_path, 'JPEG', filename + '.jpg')
+    _save_as_jpg(doc_ref, output_jpg, log)
+
     doc_ref.Close()
     log.info("Created and saved file: %s.psd" % filename)
 
@@ -283,9 +302,8 @@ def _replace_image_smart_layer(app: Callable, new_img_path: str) -> None:
 
 if __name__ == "__main__":
 
-    test_file = '\\\\192.168.0.137\\office\\Projects\\240425_Tramtrain_Innotr\\grafik\\05_VR-Touren\\SAAR\\psds\\b.psd'
-    out = "\\\\192.168.0.137\\office\\Projects\\200922_Stadler_VDV\\grafik\\02_Layout\\OUT_alle\\JPGs"
-    out = os.path.normpath(out)
+    TEST_FILE = '\\\\192.168.0.137\\office\\Projects\\240425_Tramtrain_Innotr\\grafik\\05_VR-Touren\\SAAR\\psds\\b.psd'
+    OUT = "\\\\192.168.0.137\\office\\Projects\\200922_Stadler_VDV\\grafik\\02_Layout\\OUT_alle\\JPGs"
 
     logging.basicConfig(level=logging.INFO)
     logger = logging.getLogger('ps_macros')
@@ -293,12 +311,11 @@ if __name__ == "__main__":
 
     class PseudoDirEntry:
         def __init__(self, path):
-            import os
             self.path = os.path.realpath(path)
             self.name = os.path.basename(self.path)
             self.is_dir = os.path.isdir(self.path)
             self.stat = lambda: os.stat(self.path)
 
-    test_entry = PseudoDirEntry(test_file)
+    test_entry = PseudoDirEntry(TEST_FILE)
     # create_new_psd(layers, OUT_PATH, logger)  # type: ignore
-    save_jpeg(test_entry, logger, out)
+    save_jpeg(test_entry, logger, OUT)

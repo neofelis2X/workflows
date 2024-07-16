@@ -15,7 +15,6 @@ as string constants.
 import os.path
 import os
 import subprocess
-import time
 import shutil
 import argparse
 import logging
@@ -26,31 +25,44 @@ import ps_macros
 
 BASE_PATH = os.path.normpath(secrets.BASE_PATH)
 CARRIER = secrets.CARRIER
+KRPANO_PATH = secrets.KRPANO_PATH
 LAYER = ['Ambient_Occlusion', 'Glare']
 
 def _setup_argparse() -> argparse.ArgumentParser:
     '''
     Setup and return the argument parser.
     '''
-    parser = argparse.ArgumentParser()
-    parser.add_argument('carrier', help="which carrier should be processed", type=str)
+    parser = argparse.ArgumentParser(prog='vtour File Manager',
+                                     description='Creates and updates psd files and vr tours with krpano.',
+                                     epilog='Matthias Kneidinger (c) 2024 GPLv3')
+
+    parser.add_argument('carrier',
+                        help="which carrier should be processed",
+                        choices=CARRIER,
+                        type=str)
 
     parser.add_argument('-i', '--info',
                         help="print information about the latest renderings",
                         action="store_true")
+
     parser.add_argument('-c', '--create',
-                        help="creates new .psd files from the given renderings",
-                        action="store_true")
+                        help="creates new .psd files or vtour from the given renderings",
+                        choices=('images', 'vtour'),
+                        type=str)
+
     parser.add_argument('-u', '--update',
-                        help="updates the existing .psd files with the latest renderings",
-                        action="store_true")
-    parser.add_argument('-ub', '--update_backgrounds',
-                        help="updates the existing .psd files with the latest backgrounds",
+                        help="updates the existing .psd files or vtour with the latest renderings",
+                        choices=('images','backgrounds', 'vtour'),
+                        type=str)
+
+    parser.add_argument('-s', '--save',
+                        help="save the existing .psd files as jpegs",
                         action="store_true")
 
     parser.add_argument('-v', '--verbose',
                         help="print detailed information during the process",
                         action="store_true")
+
     parser.add_argument('-d', '--debug',
                         help="print the most detailed information",
                         action="store_true")
@@ -64,21 +76,23 @@ def _setup_logger(arguments: argparse.Namespace) -> logging.Logger:
         logging_level = logging.INFO
     else:
         logging_level = logging.WARNING
-    logging.basicConfig(
-        level=logging_level,
-        format='%(asctime)s: %(name)s: %(levelname)s: %(message)s')
-    logger = logging.getLogger('psd-mang')
 
-    return logger
+    log = logging.getLogger('psd-mang')
+    log.setLevel(logging_level)
 
-def _check_carrier(arguments: argparse.Namespace,
-                  logger: logging.Logger) -> str:
+    # log_path = os.path.join(dir_path, 'vray_render.log')
+    # handler = logging.FileHandler(log_path, mode='a')
+    handler = logging.StreamHandler()
+    log.addHandler(handler)
 
-    if arguments.carrier not in CARRIER:
-        logger.error("Only those carriers are currently supported: %s", CARRIER)
-        return ''
+    formatter = logging.Formatter('%(asctime)s: %(name)s: %(levelname)s: %(message)s')
+    handler.setFormatter(formatter)
 
-    return arguments.carrier
+    log.debug("Logger has been set up.")
+    # log.debug("Logger has been set up. Path to log file:")
+    # log.debug(log_path)
+
+    return log
 
 def _output_info(carrier: str,
                 log: logging.Logger) -> bool:
@@ -187,7 +201,6 @@ def _create_local_vrtour(image_list,
                          log: logging.Logger,
                          krpano_stdout: bool = False):
 
-    KRPANO_PATH = "c:\\Program Files\\krpano"
     krpano_exe = os.path.join(KRPANO_PATH, 'krpanotools.exe')
     krpano_config = os.path.join(KRPANO_PATH, 'templates', 'vtour-normal.config')
 
@@ -196,6 +209,7 @@ def _create_local_vrtour(image_list,
                                      'config=',
                                      krpano_config,
                                      *image_list],
+                                     check=True,
                                      shell=False,
                                      capture_output=True)
 
@@ -203,7 +217,7 @@ def _create_local_vrtour(image_list,
         log.info(process_return.stdout.decode())
 
 def _save_psds_as_jpgs(carrier: str,
-                     log: logging.Logger) -> list[str]:
+                       log: logging.Logger) -> list[str]:
 
     psd_files = _get_psds(carrier, log)
     jpgs_remote = []
@@ -219,7 +233,7 @@ def _save_psds_as_jpgs(carrier: str,
     return jpgs_remote
 
 def _get_jpgs(carrier: str,
-              log: logging.Logger) -> list[str]:
+              log: logging.Logger) -> list[os.DirEntry[str]]:
     '''
     Collect .jpg files of the provided carrier.
     '''
@@ -249,14 +263,33 @@ def _copy_vtour_to_remote(carrier: str,
         shutil.copytree(vtour_dir, remote_dir, dirs_exist_ok=True)
         log.info('Successfully copied the the new tour.')
 
-def _new_vrtour_to_remote(carrier: str,
-                          log: logging.Logger,
-                          save_jpgs: bool = False):
+def _backup_panos_on_remote(carrier: str,
+                            log: logging.Logger):
 
-    if save_jpgs:
-        jpgs_remote = _save_psds_as_jpgs(carrier, log)
+    remote_dir = os.path.join(BASE_PATH, carrier, 'vtour', 'panos')
+    backup_dir = remote_dir + '_backup'
+    os.rename(remote_dir, backup_dir)
+    os.mkdir(remote_dir)
+    log.debug('Renamed panos folder to: %s' % backup_dir)
+
+def _copy_panos_to_remote(carrier: str,
+                          log: logging.Logger,
+                          temp_dir: str):
+
+    vtour_dir = os.path.join(temp_dir, 'vtour', 'panos')
+    remote_dir = os.path.join(BASE_PATH, carrier, 'vtour', 'panos')
+
+    if os.listdir(remote_dir):
+        log.error('Attention: The vtour/panos directory must be empty, to copy' \
+                  ' new panos there. Please make sure there are no files in it!')
     else:
-        jpgs_remote = _get_jpgs(carrier, log)
+        shutil.copytree(vtour_dir, remote_dir, dirs_exist_ok=True)
+        log.info('Successfully copied the the new tour.')
+
+def _create_vrtour_to_remote(carrier: str,
+                             log: logging.Logger):
+
+    jpgs_remote = _get_jpgs(carrier, log)
 
     jpgs_local = []
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -267,19 +300,26 @@ def _new_vrtour_to_remote(carrier: str,
         _create_local_vrtour(jpgs_local, log, False)
         _copy_vtour_to_remote(carrier, log, tmpdir)
 
-    # locate psd files of carrier and save them as jpeg
-    # locate vrtour on server an backup the panos folder
-    # copy jpeg files to a temp directory on the harddrive (not network)
-    # create a new vrtour with the needed settings using krpano
-    # copy the new panos folder into the tour on the server
-    # purge the temp folder
-    # open the folder the contain the vrtour in explorer
-    # delete old panos folder by hand?
-
 def _update_vrtour_on_remote(carrier: str,
                              log: logging.Logger):
 
-    pass
+    jpgs_remote = _get_jpgs(carrier, log)
+
+    jpgs_local = []
+    with tempfile.TemporaryDirectory() as tmpdir:
+        for jpg in jpgs_remote:
+            shutil.copy2(jpg, tmpdir)
+            jpgs_local.append(os.path.join(tmpdir, os.path.basename(jpg)))
+
+        _create_local_vrtour(jpgs_local, log, False)
+        _backup_panos_on_remote(carrier, log)
+        _copy_panos_to_remote(carrier, log, tmpdir)
+
+        delete_backup = input("Do you want to delete the backup? (Y/N): ")
+        if delete_backup.lower() == 'y':
+            backup_path = os.path.join(BASE_PATH, carrier, 'vtour', 'panos_backup')
+            shutil.rmtree(backup_path)
+
 
 def main() -> None:
     '''
@@ -295,10 +335,10 @@ def main() -> None:
     log.info("Base Path: %s", BASE_PATH)
     log.debug("Arguments given: %s", args)
 
-    active_carrier = _check_carrier(args, log)
-    if not active_carrier:
-        log.info("Please provide a correct carrier")
+    active_carrier = args.carrier
+    if active_carrier == ('BACKGROUNDS', 'ALL'):
         return
+
     log.info("Carrier: %s", active_carrier)
 
     if args.info:
@@ -308,19 +348,7 @@ def main() -> None:
     renderings = _get_rendered_imgs(active_carrier, log)
     backgrounds = _get_rendered_imgs('BACKGROUNDS', log)
 
-    if args.update:
-        psd_files = _get_psds(active_carrier, log)
-        for psdfile in psd_files:
-            psd_name = os.path.splitext(psdfile.name)[0]
-            ps_macros.update_all_smartlayer(psdfile, renderings[psd_name], log)
-
-    elif args.update_backgrounds:
-        psd_files = _get_psds(active_carrier, log)
-        for psdfile in psd_files:
-            psd_name = os.path.splitext(psdfile.name)[0]
-            ps_macros.update_all_smartlayer(psdfile, renderings[psd_name], log, True)
-
-    elif args.create:
+    if args.create == 'images':
         for file_key, file_entry in renderings.items():
             out_path = os.path.join(BASE_PATH, active_carrier, 'psds')
             bg_file = backgrounds.get(file_key, None)
@@ -330,14 +358,37 @@ def main() -> None:
                 break
 
             log.info("Created psd-file: %s", os.path.basename(out_path))
-        log.info("All psd-files are done")
+        log.info("All psd-files are created.")
+
+    elif args.create == 'vtour':
+        _create_vrtour_to_remote(active_carrier, log)
+
+    elif args.update == 'images':
+        psd_files = _get_psds(active_carrier, log)
+        for psdfile in psd_files:
+            psd_name = os.path.splitext(psdfile.name)[0]
+            ps_macros.update_all_smartlayer(psdfile, renderings[psd_name], log)
+
+    elif args.update == 'backgrounds':
+        psd_files = _get_psds(active_carrier, log)
+        for psdfile in psd_files:
+            psd_name = os.path.splitext(psdfile.name)[0]
+            ps_macros.update_all_smartlayer(psdfile, renderings[psd_name], log, True)
+
+    elif args.update == 'vtour':
+        _update_vrtour_on_remote(active_carrier, log)
+
+    elif args.save:
+        _save_psds_as_jpgs(active_carrier, log)
+
+    log.info("Script finished successfully.")
 
 
 if __name__ == "__main__":
-    # main()
+    main()
 
-    logging.basicConfig(level=logging.INFO)
-    logger = logging.getLogger('ps_macros')
-    logger.setLevel(logging.DEBUG)
+    #logging.basicConfig(level=logging.INFO)
+    #logger = logging.getLogger('ps_macros')
+    #logger.setLevel(logging.DEBUG)
 
-    _new_vrtour_to_remote('SAAR', logger, True)
+    #_create_vrtour_to_remote('SAAR', logger)
