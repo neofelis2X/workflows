@@ -90,7 +90,11 @@ def _render_view(view: str, log: logging.Logger) -> None:
 
     vray.RefreshUI()
 
-def _change_save_path(dirpath: str, filename: str, fileending: str, log: logging.Logger) -> None:
+def _change_save_path(dirpath: str,
+                      filename: str,
+                      fileending: str,
+                      log: logging.Logger) -> None:
+
     path = os.path.join(dirpath, filename + fileending)
     log.info("Output file name: %s", filename + fileending)
     log.debug("Output file path: %s", path)
@@ -158,7 +162,12 @@ def _get_latest_entry(path: str) -> str:
 
 def _get_renderfile_name(viewname: str) -> str:
     segments = viewname.split('_')
-    return segments[2]
+    for seg in segments:
+        if 'name-' in seg:
+            print('name:  ', seg[5:])
+            return seg[5:]
+
+    return ''
 
 def _restore_layer_state(state: str) -> bool:
     # RestoreLayerState currently does not work in Rh8!
@@ -180,7 +189,33 @@ def _load_vray_settings(filepath: str, log: logging.Logger) -> bool:
     log.debug("Successfully loaded settings file: %s", filename)
     return True
 
-def render_scene(do_render: bool = False) -> bool:
+def _prepare_vray(log: logging.Logger):
+    cuda_devices = vray.GetDeviceList(vray.RenderEngines.RE_CUDA)
+
+    for device in cuda_devices:
+        log.info("Found render device: %s", device.Name)
+        if 'NVIDIA' in device.Name or 'CPU' in device.Name:
+            use = device.UseForRendering
+            log.debug("Device is marked for use: %s - %s", device.Name, use)
+
+    _load_vray_settings(VR_RENDERSETTINGS, log)
+
+    #params = vray.Scene.SettingsOutput.ParamNames
+    #for par in params:
+    #    print(par)
+
+    with vray.Scene.Transaction() as tr:
+        #vray.Scene.SettingsOutput.img_width = 384
+        #vray.Scene.SettingsOutput.img_height = 64
+        vray.Scene.SettingsOutput.save_render = 1
+        vray.Scene.SettingsOutput.img_noAlpha = 0
+
+    success = vray.SetDeviceList(vray.RenderEngines.RE_CUDA, [0, 1])
+
+def _render_scene(group: str,
+                  filepath: str,
+                  log: logging.Logger,
+                  do_render: bool = False) -> bool:
     '''
     Create a new directory for today and render
     all views that are marked with 'r_'.
@@ -195,6 +230,27 @@ def render_scene(do_render: bool = False) -> bool:
     bool
         True on success, False on error
     '''
+
+    group_tag = ''.join(('_', group, '_'))
+
+    views = rs.NamedViews()
+    if views:
+        for view in views:
+            if view.startswith('r_') and group_tag in view:
+                log.info("Setting up view: %s", view)
+                out_name = _get_renderfile_name(view)
+
+                if not out_name:
+                    return False
+
+                _change_save_path(filepath, out_name, '.png', log)
+
+                if do_render:
+                    _render_view(view, log)
+
+    return True
+
+def render_views(view_group: str, do_render: bool = False) -> bool:
     print('Starting rendering script. Logging to file.')
 
     path = _get_output_path()
@@ -206,47 +262,19 @@ def render_scene(do_render: bool = False) -> bool:
     logger = _setup_logging(path)
     logger.info("VRay Version: %s, Core: %s", vray.Version, vray.VRayVersion)
 
-    cuda_devices = vray.GetDeviceList(vray.RenderEngines.RE_CUDA)
+    try:
+        _prepare_vray(logger)
+        _render_scene(view_group, path, logger, do_render)
 
-    for device in cuda_devices:
-        logger.info("Found render device: %s", device.Name)
-        if 'NVIDIA' in device.Name or 'CPU' in device.Name:
-            use = device.UseForRendering
-            logger.debug("Device is marked for use: %s - %s", device.Name, use)
+    finally:
+        _load_vray_settings(NORMAL_RENDERSETTINGS, logger)
+        _close_logging(logger)
 
-    _load_vray_settings(VR_RENDERSETTINGS, logger)
-
-    #params = vray.Scene.SettingsOutput.ParamNames
-    #for par in params:
-    #    print(par)
-
-    with vray.Scene.Transaction() as tr:
-        #vray.Scene.SettingsOutput.img_width = 384
-        #vray.Scene.SettingsOutput.img_height = 64
-        vray.Scene.SettingsOutput.save_render = 1
-        vray.Scene.SettingsOutput.img_noAlpha = 0
-
-    success = vray.SetDeviceList(vray.RenderEngines.RE_CUDA, [0, 1])
-
-    _restore_layer_state('ex')
-
-    views = rs.NamedViews()
-    if views:
-        for view in views:
-            if view.startswith('r_') and '_ex_' in view:
-                logger.info("Setting up view: %s", view)
-                out_name = _get_renderfile_name(view)
-                _change_save_path(path, out_name, '.png', logger)
-                if do_render:
-                    _render_view(view, logger)
-
-    _load_vray_settings(NORMAL_RENDERSETTINGS, logger)
-    _close_logging(logger)
     print('Finishing rendering script.')
-    return True
 
-render_scene(True)
-# _restore_layer_state('str')
+
+render_views('ex', True)
+
 
 if __name__ == "__main__":
     pass

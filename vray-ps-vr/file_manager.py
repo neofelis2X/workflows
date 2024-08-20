@@ -33,12 +33,13 @@ def _setup_argparse() -> argparse.ArgumentParser:
     Setup and return the argument parser.
     '''
     parser = argparse.ArgumentParser(prog='vtour File Manager',
-                                     description='Creates and updates psd files and vr tours with krpano.',
+                                     description='Creates and updates psd files and krpano vr tours.',
                                      epilog='Matthias Kneidinger (c) 2024 GPLv3')
 
     parser.add_argument('carrier',
-                        help="which carrier should be processed",
+                        help="which carrier should be processed, enter multiple if needed",
                         choices=CARRIER,
+                        nargs='+',
                         type=str)
 
     parser.add_argument('-i', '--info',
@@ -60,7 +61,7 @@ def _setup_argparse() -> argparse.ArgumentParser:
                         action="store_true")
 
     parser.add_argument('-v', '--verbose',
-                        help="print detailed information during the process",
+                        help="print information during the process",
                         action="store_true")
 
     parser.add_argument('-d', '--debug',
@@ -267,8 +268,16 @@ def _backup_panos_on_remote(carrier: str,
                             log: logging.Logger):
 
     remote_dir = os.path.join(BASE_PATH, carrier, 'vtour', 'panos')
-    backup_dir = remote_dir + '_backup'
-    os.rename(remote_dir, backup_dir)
+
+    if os.path.isdir(remote_dir):
+
+        backup_dir = remote_dir + '_backup'
+
+        if os.path.isdir(backup_dir):
+            shutil.rmtree(backup_dir)
+
+        os.rename(remote_dir, backup_dir)
+
     os.mkdir(remote_dir)
     log.debug('Renamed panos folder to: %s' % backup_dir)
 
@@ -285,6 +294,24 @@ def _copy_panos_to_remote(carrier: str,
     else:
         shutil.copytree(vtour_dir, remote_dir, dirs_exist_ok=True)
         log.info('Successfully copied the the new tour.')
+
+def _copy_panos_to_combined(carrier: str,
+                          log: logging.Logger,
+                          temp_dir: str):
+
+    vtour_dir = os.path.join(temp_dir, 'vtour', 'panos')
+    dir_name = '_'.join(('panos', carrier.lower()))
+    print(dir_name)
+    remote_dir = os.path.join(BASE_PATH, 'COMBINED', 'vtour', dir_name)
+
+    if os.listdir(remote_dir):
+        log.warning('Attention: The exisiting vtour/panos directory must be deleted,' \
+                  ' to copy new panos there.')
+        shutil.rmtree(remote_dir)
+        os.mkdir(remote_dir)
+
+    shutil.copytree(vtour_dir, remote_dir, dirs_exist_ok=True)
+    log.info('Successfully copied the the new tour to COMBINED.')
 
 def _create_vrtour_to_remote(carrier: str,
                              log: logging.Logger):
@@ -314,8 +341,9 @@ def _update_vrtour_on_remote(carrier: str,
         _create_local_vrtour(jpgs_local, log, False)
         _backup_panos_on_remote(carrier, log)
         _copy_panos_to_remote(carrier, log, tmpdir)
+        _copy_panos_to_combined(carrier, log, tmpdir)
 
-        delete_backup = input("Do you want to delete the backup? (Y/N): ")
+        delete_backup = input("Do you want to delete the backup? (Y/N): ") or 'y'
         if delete_backup.lower() == 'y':
             backup_path = os.path.join(BASE_PATH, carrier, 'vtour', 'panos_backup')
             shutil.rmtree(backup_path)
@@ -335,51 +363,58 @@ def main() -> None:
     log.info("Base Path: %s", BASE_PATH)
     log.debug("Arguments given: %s", args)
 
-    active_carrier = args.carrier
-    if active_carrier == ('BACKGROUNDS', 'ALL'):
-        return
+    if 'ALL' in args.carrier:
+        carrier_list = CARRIER[:-2]
+    else:
+        carrier_list = tuple(filter(lambda x: (x != 'BACKGROUNDS'), args.carrier))
 
-    log.info("Carrier: %s", active_carrier)
+    for carr in carrier_list:
 
-    if args.info:
-        _output_info(active_carrier, log)
-        return
+        active_carrier = carr
 
-    renderings = _get_rendered_imgs(active_carrier, log)
-    backgrounds = _get_rendered_imgs('BACKGROUNDS', log)
+        log.info("Carrier: %s", active_carrier)
 
-    if args.create == 'images':
-        for file_key, file_entry in renderings.items():
-            out_path = os.path.join(BASE_PATH, active_carrier, 'psds')
-            bg_file = backgrounds.get(file_key, None)
+        if args.info:
+            _output_info(active_carrier, log)
+            return
 
-            status = ps_macros.create_new_psd(file_entry, out_path, log, bg_file)
-            if not status:
-                break
+        renderings = _get_rendered_imgs(active_carrier, log)
+        backgrounds = _get_rendered_imgs('BACKGROUNDS', log)
 
-            log.info("Created psd-file: %s", os.path.basename(out_path))
-        log.info("All psd-files are created.")
+        if args.create == 'images':
+            for file_key, file_entry in renderings.items():
+                out_path = os.path.join(BASE_PATH, active_carrier, 'psds')
+                bg_file = backgrounds.get(file_key, None)
 
-    elif args.create == 'vtour':
-        _create_vrtour_to_remote(active_carrier, log)
+                status = ps_macros.create_new_psd(file_entry, out_path, log, bg_file)
+                if not status:
+                    break
 
-    elif args.update == 'images':
-        psd_files = _get_psds(active_carrier, log)
-        for psdfile in psd_files:
-            psd_name = os.path.splitext(psdfile.name)[0]
-            ps_macros.update_all_smartlayer(psdfile, renderings[psd_name], log)
+                log.info("Created psd-file: %s", os.path.basename(out_path))
+            log.info("All psd-files are created.")
 
-    elif args.update == 'backgrounds':
-        psd_files = _get_psds(active_carrier, log)
-        for psdfile in psd_files:
-            psd_name = os.path.splitext(psdfile.name)[0]
-            ps_macros.update_all_smartlayer(psdfile, renderings[psd_name], log, True)
+        elif args.create == 'vtour':
+            _create_vrtour_to_remote(active_carrier, log)
 
-    elif args.update == 'vtour':
-        _update_vrtour_on_remote(active_carrier, log)
+        elif args.update == 'images':
+            psd_files = _get_psds(active_carrier, log)
+            for psdfile in psd_files:
+                psd_name = os.path.splitext(psdfile.name)[0]
+                if psd_name in renderings:
+                    ps_macros.update_all_smartlayer(psdfile, renderings[psd_name], log)
 
-    elif args.save:
-        _save_psds_as_jpgs(active_carrier, log)
+        elif args.update == 'backgrounds':
+            psd_files = _get_psds(active_carrier, log)
+            for psdfile in psd_files:
+                psd_name = os.path.splitext(psdfile.name)[0]
+                if psd_name in renderings:
+                    ps_macros.update_all_smartlayer(psdfile, renderings[psd_name], log, True)
+
+        elif args.update == 'vtour':
+            _update_vrtour_on_remote(active_carrier, log)
+
+        elif args.save:
+            _save_psds_as_jpgs(active_carrier, log)
 
     log.info("Script finished successfully.")
 
