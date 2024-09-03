@@ -33,7 +33,7 @@ create_new_psd()
 import os
 import os.path
 import logging
-from typing import Optional, Callable
+from collections.abc import Callable
 
 import win32com.client as win32
 from pywintypes import com_error  # pylint: disable=E0611
@@ -170,7 +170,7 @@ def update_all_smartlayer(psd_file: os.DirEntry,
 def create_new_psd(img_layers: dict[str, os.DirEntry],
                    output_path: str,
                    log: logging.Logger,
-                   bg_layers: Optional[dict[str, os.DirEntry]] = None) -> bool:
+                   bg_layers: dict[str, os.DirEntry] | None = None) -> bool:
     '''
     Creates a new psd file in the right directory based
     on the latest rendered images
@@ -233,7 +233,7 @@ def create_new_psd(img_layers: dict[str, os.DirEntry],
     return True
 
 
-def _prepare_photoshop(log: logging.Logger) -> Optional[Callable]:
+def _prepare_photoshop(log: logging.Logger) ->Callable | None:
     try:
         app = win32.gencache.EnsureDispatch("Photoshop.Application")
     except com_error:
