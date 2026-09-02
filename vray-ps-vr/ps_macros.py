@@ -35,7 +35,12 @@ import os.path
 import logging
 from collections.abc import Callable
 
-import win32com.client as win32
+try:
+    import win32com.client as win32
+except ImportError:
+    print("Import Error: Please run pip install pywin32")
+    import sys
+    sys.exit()
 from pywintypes import com_error  # pylint: disable=E0611
 
 PS_MM = 4
