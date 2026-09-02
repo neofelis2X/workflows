@@ -194,7 +194,7 @@ def _get_rendered_imgs(carrier: str,
                     file_tree[segments[0]]['base'] = entry
                     log.debug("Found base file: %s" % entry.name)
 
-    log.info("Collected %i render files." % len(file_tree))
+    log.info("Collected %i render files for %s.", len(file_tree), carrier)         
 
     return file_tree
 
